@@ -10,6 +10,10 @@ import {
 function Attendance() {
   const subjects = ["DBMS", "ADSA", "AMT", "AT", "FSJP", "EDE", "EVS"];
 
+  // Read the logged-in user's role
+  const role = localStorage.getItem("role");
+  const isFaculty = role === "faculty";
+
   const [subject, setSubject] = useState("DBMS");
   const [classType, setClassType] = useState("Theory");
   const [session, setSession] = useState(null);
@@ -22,19 +26,21 @@ function Attendance() {
       const data = await getAttendanceSummary(1);
       setSummary(data);
     } catch (error) {
-      setMessage(error.message || "Could not load attendance summary.");
+      setMessage(
+        error.message || "Could not load attendance summary."
+      );
     }
   }
 
- useEffect(() => {
-  loadSummary();
+  useEffect(() => {
+    loadSummary();
 
-  window.addEventListener("attendanceUpdated", loadSummary);
+    window.addEventListener("attendanceUpdated", loadSummary);
 
-  return () => {
-    window.removeEventListener("attendanceUpdated", loadSummary);
-  };
-}, []);
+    return () => {
+      window.removeEventListener("attendanceUpdated", loadSummary);
+    };
+  }, []);
 
   async function generateQR() {
     setLoading(true);
@@ -60,7 +66,9 @@ function Attendance() {
 
     try {
       const result = await markAttendance(1, session.qrToken);
-      setMessage(result.message || "Attendance marked successfully!");
+      setMessage(
+        result.message || "Attendance marked successfully!"
+      );
       await loadSummary();
     } catch (error) {
       setMessage(error.message || "Could not mark attendance.");
@@ -74,13 +82,18 @@ function Attendance() {
   return (
     <div className="attendance-page">
       <h1>📊 Attendance</h1>
+
       <p className="attendance-subtitle">
-        Track attendance and generate QR codes for classes.
+        Track your attendance and view class attendance records.
       </p>
 
+      {/* Overall Attendance: visible to both Student and Faculty */}
       <section className="overall-card">
         <h2>Overall Attendance</h2>
-        <div className="overall-number">{overallPercentage}%</div>
+
+        <div className="overall-number">
+          {overallPercentage}%
+        </div>
 
         <p>
           Classes attended: {summary?.attendedClasses ?? 0}/
@@ -101,70 +114,87 @@ function Attendance() {
         </p>
       </section>
 
-      <section className="overall-card">
-        <h2>QR Attendance System</h2>
-        <p>Select the subject and class type to generate a QR code.</p>
+      {/* QR generation: visible only to Faculty */}
+      {isFaculty && (
+        <section className="overall-card">
+          <h2>QR Attendance System</h2>
 
-        <label htmlFor="attendance-subject">Subject</label>{" "}
-        <select
-          id="attendance-subject"
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-        >
-          {subjects.map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
-          ))}
-        </select>
+          <p>
+            Select the subject and class type to generate a QR code.
+          </p>
 
-        <br />
-        <br />
+          <label htmlFor="attendance-subject">Subject</label>{" "}
 
-        <label htmlFor="attendance-type">Class type</label>{" "}
-        <select
-          id="attendance-type"
-          value={classType}
-          onChange={(e) => setClassType(e.target.value)}
-        >
-          <option value="Theory">Theory</option>
-          <option value="Practical">Practical</option>
-        </select>
+          <select
+            id="attendance-subject"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+          >
+            {subjects.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
 
-        <br />
-        <br />
+          <br />
+          <br />
 
-        <button onClick={generateQR} disabled={loading}>
-          {loading ? "Please wait..." : "Generate QR Code"}
-        </button>
+          <label htmlFor="attendance-type">Class type</label>{" "}
 
-        {message && <p role="status">{message}</p>}
+          <select
+            id="attendance-type"
+            value={classType}
+            onChange={(e) => setClassType(e.target.value)}
+          >
+            <option value="Theory">Theory</option>
+            <option value="Practical">Practical</option>
+          </select>
 
-        {session && (
-          <div style={{ marginTop: "20px" }}>
-            <h3>{session.subject} — {session.classType}</h3>
-            <p>Scan this QR code to mark attendance.</p>
+          <br />
+          <br />
 
-            <QRCodeSVG
-              value={session.qrToken}
-              size={220}
-              level="M"
-              includeMargin
-            />
+          <button onClick={generateQR} disabled={loading}>
+            {loading ? "Please wait..." : "Generate QR Code"}
+          </button>
 
-            <p>
-              <strong>Expires at:</strong>{" "}
-              {new Date(session.expiresAt).toLocaleTimeString()}
-            </p>
+          {message && <p role="status">{message}</p>}
 
-            <button onClick={markDemoAttendance} disabled={loading}>
-              Mark Attendance (Demo Student)
-            </button>
-          </div>
-        )}
-      </section>
+          {session && (
+            <div style={{ marginTop: "20px" }}>
+              <h3>
+                {session.subject} — {session.classType}
+              </h3>
 
-      <h2 className="subject-heading">Subject-wise Attendance</h2>
+              <p>Scan this QR code to mark attendance.</p>
+
+              <QRCodeSVG
+                value={session.qrToken}
+                size={220}
+                level="M"
+                includeMargin
+              />
+
+              <p>
+                <strong>Expires at:</strong>{" "}
+                {new Date(session.expiresAt).toLocaleTimeString()}
+              </p>
+
+              <button
+                onClick={markDemoAttendance}
+                disabled={loading}
+              >
+                Mark Attendance (Demo Student)
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Subject-wise Attendance: visible to both roles */}
+      <h2 className="subject-heading">
+        Subject-wise Attendance
+      </h2>
 
       {!summary && <p>Loading attendance data...</p>}
 
@@ -180,19 +210,26 @@ function Attendance() {
           >
             <div style={{ width: "100%" }}>
               <h3>{item.subject}</h3>
+
               <p>
                 {item.classType} · {item.attendedClasses}/
                 {item.totalClasses} classes attended
               </p>
+
               <p>
-                <strong>{Number(item.percentage).toFixed(1)}%</strong>
+                <strong>
+                  {Number(item.percentage).toFixed(1)}%
+                </strong>
               </p>
 
               <div className="attendance-progress">
                 <div
                   className="attendance-progress-fill"
                   style={{
-                    width: `${Math.min(100, Math.max(0, Number(item.percentage)))}%`,
+                    width: `${Math.min(
+                      100,
+                      Math.max(0, Number(item.percentage))
+                    )}%`,
                   }}
                 />
               </div>

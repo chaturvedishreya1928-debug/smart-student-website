@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+backend-error.txt
+error-log.txt
+latest-error.txt
