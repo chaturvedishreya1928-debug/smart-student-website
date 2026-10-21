@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -6,6 +5,18 @@ import {
   getAttendanceSummary,
   getFacultySessionAttendance,
 } from "../api/backend";
+
+// Render returns LocalDateTime without a timezone.
+// Treat timezone-less expiry values as UTC.
+function getExpiryTime(value) {
+  if (!value) return NaN;
+
+  const timestamp = value.endsWith("Z")
+    ? value
+    : `${value}Z`;
+
+  return Date.parse(timestamp);
+}
 
 function FacultyAttendance() {
   const subjects = ["DBMS", "ADSA", "AMT", "AT", "FSJP", "EDE", "EVS"];
@@ -28,55 +39,96 @@ function FacultyAttendance() {
     }
 
     const updateTimer = () => {
-      const remaining = Math.max(
-        0,
-        Math.ceil(
-          (new Date(session.expiresAt).getTime() - Date.now()) / 1000
-        )
-      );
+      const expiryTime = getExpiryTime(session.expiresAt);
+
+      const remaining = Number.isFinite(expiryTime)
+        ? Math.max(
+            0,
+            Math.ceil((expiryTime - Date.now()) / 1000)
+          )
+        : 0;
+
       setSecondsLeft(remaining);
     };
 
     updateTimer();
+
     const timer = setInterval(updateTimer, 1000);
 
     return () => clearInterval(timer);
   }, [session]);
 
-  // Demo student summary
+  // Load demo student attendance summary
   useEffect(() => {
     getAttendanceSummary(1)
       .then(setSummary)
       .catch(() => setSummary(null));
   }, []);
 
-  // Generate QR and load its attendance report
+  // Generate QR and load student attendance list
   async function generateQR() {
     setLoading(true);
     setMessage("");
+    setSession(null);
+    setSecondsLeft(0);
+    setClassReport(null);
 
     try {
-      const data = await createAttendanceSession(subject, classType);
+      const data = await createAttendanceSession(
+        subject,
+        classType
+      );
+
+      if (!data?.id || !data?.qrToken || !data?.expiresAt) {
+        throw new Error(
+          "The server returned an incomplete QR session."
+        );
+      }
+
+      const expiryTime = getExpiryTime(data.expiresAt);
+      console.log("Expiry from server:", data.expiresAt);
+console.log("Seconds remaining:", (expiryTime - Date.now()) / 1000);
+
+      if (
+        !Number.isFinite(expiryTime) ||
+        expiryTime <= Date.now()
+      ) {
+        throw new Error(
+          "The QR session has expired. Please generate a new one."
+        );
+      }
 
       setSession(data);
-      setClassReport(null);
+
+      setSecondsLeft(
+        Math.ceil((expiryTime - Date.now()) / 1000)
+      );
+
+      setMessage("QR code generated successfully.");
       setReportLoading(true);
 
       try {
-        const report = await getFacultySessionAttendance(data.id);
+        const report = await getFacultySessionAttendance(
+          data.id
+        );
+
         setClassReport(report);
       } catch (error) {
         setMessage(
-          error.message || "QR created, but the student list could not load."
+          `QR generated, but student list could not load: ${
+            error.message || "Please refresh the list."
+          }`
         );
       } finally {
         setReportLoading(false);
       }
-
-      setMessage("QR code generated successfully.");
     } catch (error) {
       setSession(null);
-      setMessage(error.message || "Could not generate QR code.");
+      setSecondsLeft(0);
+
+      setMessage(
+        error.message || "Could not generate QR code."
+      );
     } finally {
       setLoading(false);
     }
@@ -93,11 +145,16 @@ function FacultyAttendance() {
     setMessage("");
 
     try {
-      const report = await getFacultySessionAttendance(session.id);
+      const report = await getFacultySessionAttendance(
+        session.id
+      );
+
       setClassReport(report);
       setMessage("Student attendance list refreshed.");
     } catch (error) {
-      setMessage(error.message || "Could not refresh student list.");
+      setMessage(
+        error.message || "Could not refresh student list."
+      );
     } finally {
       setReportLoading(false);
     }
@@ -105,12 +162,14 @@ function FacultyAttendance() {
 
   const percentage = Math.min(
     100,
-    Math.max(0, Number(summary?.overallPercentage) || 0)
+    Math.max(
+      0,
+      Number(summary?.overallPercentage) || 0
+    )
   );
 
   return (
     <div style={styles.page}>
-      {/* Header */}
       <button
         onClick={() => window.history.back()}
         style={styles.backButton}
@@ -121,30 +180,44 @@ function FacultyAttendance() {
       <header style={styles.header}>
         <div>
           <p style={styles.eyebrow}>FACULTY WORKSPACE</p>
-          <h1 style={styles.pageTitle}>Faculty Attendance</h1>
+
+          <h1 style={styles.pageTitle}>
+            Faculty Attendance
+          </h1>
+
           <p style={styles.subtitle}>
-            Generate classroom QR codes and monitor student attendance.
+            Generate classroom QR codes and monitor student
+            attendance.
           </p>
         </div>
 
         <div style={styles.headerIcon}>📋</div>
       </header>
 
-      {/* Two-column top section */}
       <div style={styles.topGrid}>
         {/* QR Generator */}
         <section style={styles.card}>
           <div style={styles.sectionHeading}>
             <div style={styles.iconBox}>📷</div>
+
             <div>
-              <h2 style={styles.cardTitle}>Generate Attendance QR</h2>
-              <p style={styles.muted}>Create a QR code for your class.</p>
+              <h2 style={styles.cardTitle}>
+                Generate Attendance QR
+              </h2>
+
+              <p style={styles.muted}>
+                Create a QR code for your class.
+              </p>
             </div>
           </div>
 
-          <label htmlFor="faculty-subject" style={styles.label}>
+          <label
+            htmlFor="faculty-subject"
+            style={styles.label}
+          >
             Subject
           </label>
+
           <select
             id="faculty-subject"
             value={subject}
@@ -158,9 +231,13 @@ function FacultyAttendance() {
             ))}
           </select>
 
-          <label htmlFor="faculty-class-type" style={styles.label}>
+          <label
+            htmlFor="faculty-class-type"
+            style={styles.label}
+          >
             Class Type
           </label>
+
           <select
             id="faculty-class-type"
             value={classType}
@@ -180,11 +257,15 @@ function FacultyAttendance() {
             }}
           >
             {loading ? "Generating..." : "Generate QR Code"}
+
             {!loading && <span>→</span>}
           </button>
 
           {message && (
-            <p role="status" style={styles.message}>
+            <p
+              role="status"
+              style={styles.message}
+            >
               {message}
             </p>
           )}
@@ -196,11 +277,17 @@ function FacultyAttendance() {
               </h3>
 
               <div style={styles.qrImage}>
-                <QRCodeSVG value={session.qrToken} size={180} />
+                <QRCodeSVG
+                  value={session.qrToken}
+                  size={200}
+                  level="M"
+                  includeMargin
+                />
               </div>
 
               <div style={styles.timer}>
-                ⏱ QR expires in {Math.floor(secondsLeft / 60)}:
+                ⏱ QR expires in{" "}
+                {Math.floor(secondsLeft / 60)}:
                 {String(secondsLeft % 60).padStart(2, "0")}
               </div>
 
@@ -217,27 +304,38 @@ function FacultyAttendance() {
           )}
         </section>
 
-        {/* Attendance overview */}
+        {/* Attendance Overview */}
         <section style={styles.card}>
           <div style={styles.sectionHeading}>
             <div style={styles.iconBox}>📊</div>
+
             <div>
-              <h2 style={styles.cardTitle}>Attendance Overview</h2>
-              <p style={styles.muted}>Demo student summary</p>
+              <h2 style={styles.cardTitle}>
+                Attendance Overview
+              </h2>
+
+              <p style={styles.muted}>
+                Demo student summary
+              </p>
             </div>
           </div>
 
           {summary ? (
             <>
               <div style={styles.studentLabel}>
-                Student ID: <strong>{summary.studentId}</strong>
+                Student ID:{" "}
+                <strong>{summary.studentId}</strong>
               </div>
 
               <div style={styles.statsGrid}>
                 <div style={styles.statBox}>
-                  <p style={styles.muted}>Attended Classes</p>
+                  <p style={styles.muted}>
+                    Attended Classes
+                  </p>
+
                   <h3 style={styles.statNumber}>
                     {summary.attendedClasses}
+
                     <span style={styles.statTotal}>
                       {" "}/ {summary.totalClasses}
                     </span>
@@ -246,7 +344,10 @@ function FacultyAttendance() {
 
                 <div style={styles.statBox}>
                   <p style={styles.muted}>Attendance</p>
-                  <h3 style={styles.statNumber}>{percentage}%</h3>
+
+                  <h3 style={styles.statNumber}>
+                    {percentage}%
+                  </h3>
                 </div>
               </div>
 
@@ -260,7 +361,8 @@ function FacultyAttendance() {
               </div>
 
               <p style={styles.muted}>
-                This is one demo student's summary, not the whole class.
+                This is one demo student's summary, not the
+                whole class.
               </p>
             </>
           ) : (
@@ -271,23 +373,29 @@ function FacultyAttendance() {
 
           <div style={styles.tipBox}>
             <strong>💡 Quick tip</strong>
+
             <p style={{ marginBottom: 0 }}>
-              Generate a fresh QR for each attendance session. The QR is valid
-              for a limited time.
+              Generate a fresh QR for each attendance session.
+              The QR is valid for a limited time.
             </p>
           </div>
         </section>
       </div>
 
-      {/* Full-width student attendance list */}
+      {/* Student Attendance List */}
       <section style={styles.card}>
         <div style={styles.reportHeader}>
           <div style={styles.sectionHeading}>
             <div style={styles.iconBox}>👥</div>
+
             <div>
-              <h2 style={styles.cardTitle}>Student Attendance List</h2>
+              <h2 style={styles.cardTitle}>
+                Student Attendance List
+              </h2>
+
               <p style={styles.muted}>
-                Review attendance for the selected classroom session.
+                Review attendance for the selected classroom
+                session.
               </p>
             </div>
           </div>
@@ -298,15 +406,20 @@ function FacultyAttendance() {
             style={{
               ...styles.primaryButton,
               width: "auto",
-              opacity: reportLoading || !session ? 0.6 : 1,
+              opacity:
+                reportLoading || !session ? 0.6 : 1,
             }}
           >
-            {reportLoading ? "Refreshing..." : "↻ Refresh List"}
+            {reportLoading
+              ? "Refreshing..."
+              : "↻ Refresh List"}
           </button>
         </div>
 
         {reportLoading && (
-          <p style={styles.muted}>Loading student records...</p>
+          <p style={styles.muted}>
+            Loading student records...
+          </p>
         )}
 
         {classReport && (
@@ -314,20 +427,31 @@ function FacultyAttendance() {
             <div style={styles.reportStats}>
               <div>
                 <p style={styles.muted}>Subject / Class</p>
+
                 <strong>
-                  {classReport.subject} · {classReport.classType}
+                  {classReport.subject} ·{" "}
+                  {classReport.classType}
                 </strong>
               </div>
 
               <div>
-                <p style={styles.muted}>Students Present</p>
+                <p style={styles.muted}>
+                  Students Present
+                </p>
+
                 <strong>
-                  {classReport.presentCount} / {classReport.totalStudents}
+                  {classReport.presentCount} /{" "}
+                  {classReport.totalStudents}
                 </strong>
               </div>
             </div>
 
-            <div style={{ overflowX: "auto", marginTop: "20px" }}>
+            <div
+              style={{
+                overflowX: "auto",
+                marginTop: "20px",
+              }}
+            >
               <table style={styles.table}>
                 <thead>
                   <tr>
@@ -338,7 +462,10 @@ function FacultyAttendance() {
                       "Semester",
                       "Status",
                     ].map((heading) => (
-                      <th key={heading} style={styles.tableHeader}>
+                      <th
+                        key={heading}
+                        style={styles.tableHeader}
+                      >
                         {heading}
                       </th>
                     ))}
@@ -346,34 +473,48 @@ function FacultyAttendance() {
                 </thead>
 
                 <tbody>
-                  {classReport.students.map((student) => (
-                    <tr key={student.studentId}>
-                      <td style={styles.tableCell}>{student.studentId}</td>
-                      <td style={styles.tableCell}>{student.name}</td>
-                      <td style={styles.tableCell}>
-                        {student.department || "—"}
-                      </td>
-                      <td style={styles.tableCell}>
-                        {student.semester ?? "—"}
-                      </td>
-                      <td style={styles.tableCell}>
-                        <span
-                          style={{
-                            ...styles.statusBadge,
-                            ...(student.status === "Present"
-                              ? styles.presentBadge
-                              : styles.notMarkedBadge),
-                          }}
-                        >
-                          {student.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {(classReport.students || []).map(
+                    (student) => (
+                      <tr key={student.studentId}>
+                        <td style={styles.tableCell}>
+                          {student.studentId}
+                        </td>
 
-                  {classReport.students.length === 0 && (
+                        <td style={styles.tableCell}>
+                          {student.name}
+                        </td>
+
+                        <td style={styles.tableCell}>
+                          {student.department || "—"}
+                        </td>
+
+                        <td style={styles.tableCell}>
+                          {student.semester ?? "—"}
+                        </td>
+
+                        <td style={styles.tableCell}>
+                          <span
+                            style={{
+                              ...styles.statusBadge,
+                              ...(student.status === "Present"
+                                ? styles.presentBadge
+                                : styles.notMarkedBadge),
+                            }}
+                          >
+                            {student.status || "Not Marked"}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  )}
+
+                  {(classReport.students || []).length ===
+                    0 && (
                     <tr>
-                      <td colSpan={5} style={styles.tableCell}>
+                      <td
+                        colSpan={5}
+                        style={styles.tableCell}
+                      >
                         No students found.
                       </td>
                     </tr>
@@ -387,11 +528,19 @@ function FacultyAttendance() {
         {!reportLoading && !classReport && (
           <div style={styles.emptyState}>
             <span style={{ fontSize: "30px" }}>📝</span>
-            <p style={{ marginBottom: "5px", fontWeight: "bold" }}>
+
+            <p
+              style={{
+                marginBottom: "5px",
+                fontWeight: "bold",
+              }}
+            >
               No session report loaded
             </p>
+
             <p style={styles.muted}>
-              Generate a QR code to load the attendance list for that session.
+              Generate a QR code to load the attendance list
+              for that session.
             </p>
           </div>
         )}
@@ -405,15 +554,14 @@ function FacultyAttendance() {
 }
 
 const styles = {
- page: {
-  padding: "24px",
-  minHeight: "100vh",
-  width: "100%",
-  boxSizing: "border-box",
-  background: "#f5f6fc",
-  fontFamily: "Arial, sans-serif",
-},
-  
+  page: {
+    padding: "24px",
+    minHeight: "100vh",
+    width: "100%",
+    boxSizing: "border-box",
+    background: "#f5f6fc",
+    fontFamily: "Arial, sans-serif",
+  },
 
   backButton: {
     padding: "10px 14px",
@@ -429,6 +577,7 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
+    flexWrap: "wrap",
     gap: "18px",
     margin: "28px 0",
     padding: "25px 28px",
@@ -464,13 +613,16 @@ const styles = {
     borderRadius: "18px",
     background: "rgba(255,255,255,0.14)",
   },
-topGrid: {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-  gap: "24px",
-  width: "100%",
-  alignItems: "start",
-},
+
+  topGrid: {
+    display: "grid",
+    gridTemplateColumns:
+      "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
+    gap: "24px",
+    width: "100%",
+    alignItems: "start",
+  },
+
   card: {
     background: "#fff",
     padding: "clamp(18px, 2.2vw, 28px)",
@@ -556,16 +708,15 @@ topGrid: {
     overflowWrap: "anywhere",
   },
 
-qrPanel: {
-  marginTop: "16px",
-  padding: "14px 10px",
-  textAlign: "center",
-  background: "#f8f6ff",
-  border: "1px solid #e8e0fa",
-  borderRadius: "14px",
-  overflowWrap: "anywhere",
-},
-
+  qrPanel: {
+    marginTop: "16px",
+    padding: "14px 10px",
+    textAlign: "center",
+    background: "#f8f6ff",
+    border: "1px solid #e8e0fa",
+    borderRadius: "14px",
+    overflowWrap: "anywhere",
+  },
 
   qrTitle: {
     color: "#263f75",
@@ -573,21 +724,20 @@ qrPanel: {
   },
 
   qrImage: {
-  display: "flex",
-  justifyContent: "center",
-  padding: "8px",
-  background: "#fff",
-  borderRadius: "12px",
-  maxWidth: "fit-content",
-  margin: "0 auto",
-},
+    display: "flex",
+    justifyContent: "center",
+    padding: "8px",
+    background: "#fff",
+    borderRadius: "12px",
+    maxWidth: "fit-content",
+    margin: "0 auto",
+  },
 
- timer: {
-  marginTop: "10px",
-  color: "#56339a",
-  fontWeight: "bold",
-},
-  
+  timer: {
+    marginTop: "10px",
+    color: "#56339a",
+    fontWeight: "bold",
+  },
 
   expired: {
     color: "#b42318",
@@ -605,7 +755,8 @@ qrPanel: {
 
   statsGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))",
+    gridTemplateColumns:
+      "repeat(auto-fit, minmax(min(100%, 150px), 1fr))",
     gap: "12px",
     margin: "12px 0 18px",
   },

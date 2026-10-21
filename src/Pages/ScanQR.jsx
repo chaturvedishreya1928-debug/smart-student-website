@@ -44,7 +44,13 @@ function ScanQR() {
               await scanner.clear();
               scannerRef.current = null;
 
-              const data = await markAttendance(1, decodedText);
+              const studentId = sessionStorage.getItem("studentId");
+
+if (!studentId) {
+  throw new Error("Student ID nahi mili. Please logout karke student account se dobara login karo.");
+}
+
+const data = await markAttendance(Number(studentId), decodedText);
 
               setResult(data);
               setMessage(
