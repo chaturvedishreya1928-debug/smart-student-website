@@ -9,6 +9,7 @@ import java.util.Map;
 
 @RestController
 @CrossOrigin(origins = {
+    "https://smart-student-website.vercel.app",
     "http://localhost:5173",
     "http://localhost:5174"
 })
